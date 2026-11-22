@@ -32,7 +32,7 @@ Use `git log` or GitHub's compare view against upstream `pulp-platform/ara` to s
 
 ## Credits
 
-Course project for Computer Architecture. Team: _(add names)_. The sparse-aware instruction (`vfsegsum`), its kernels and its evaluation were my part. Build fixes and testbench counters were shared team infrastructure. Built on Ara and CVA6 by the PULP Platform team (ETH Zürich / University of Bologna), under their original licenses.
+Course project for Computer Architecture by Ramanujan Gopalan and Varun Golcha. The sparse-aware instruction (`vfsegsum`), its kernels and its evaluation were my part. Build fixes and testbench counters were shared team infrastructure. Built on Ara and CVA6 by the PULP Platform team (ETH Zürich / University of Bologna), under their original licenses.
 
 ---
 
