@@ -65,9 +65,9 @@ A list of non-empty rows would map the j-th packed result to its row of y.
 
 ### 4.2 Refined proposal: `vfsegsum` (running sum at every position)
 
-Checking the first proposal against Ara and a software prototype showed some problems:
+Checking the first proposal against Ara showed some problems:
 - The carry-out lands at a position that changes from window to window, which makes the next window awkward to start.
-- Packing needs `vcompress`-style logic, and Ara's `vcompress` had bugs on this path. We found and isolated 3 functional bugs while building the software version.
+- Packing needs `vcompress`-style logic, and Ara's `vcompress` has functional bugs on this path (it can hang, and returns wrong elements after a float reduction).
 - The number of results per window has to be known in advance, or the scalar core waits on every window.
 
 So the proposal became a simpler instruction that **doesn't pack**:
@@ -85,7 +85,7 @@ for i in 0 .. vl-1:
 - Every position gets its running sum, so each row total sits at its tail position.
 - A **masked scatter** (mask = `v0`, offsets = each element's row in y, precomputed) writes only the totals to y. This also places results correctly around empty rows without any packing.
 - The carry is the last element of `vd`: one `vslidedown` moves it to element 0, and one `vfadd` adds it into the next window.
-- It is a drop-in replacement for the slow step of the software version (log₂ rounds of slide + masked add).
+- Without it, the same running sum takes log₂(VLMAX) rounds of slide + masked add with existing instructions; with it, one instruction.
 
 ### 4.3 Where it goes in the hardware
 

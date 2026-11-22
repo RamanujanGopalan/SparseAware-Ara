@@ -1,4 +1,44 @@
-# Ara
+# SparseAware-Ara: a segmented-sum vector instruction for sparse SpMV/SpMM
+
+This is a fork of [pulp-platform/ara](https://github.com/pulp-platform/ara), the open-source RISC-V vector processor, extended with **one new vector instruction, `vfsegsum`**. It lets sparse matrix kernels work on fixed windows of non-zeros instead of reducing row by row.
+
+**Full write-up (idea, hardware, kernels, results): [`sparse-aware/README.md`](sparse-aware/README.md)** · Idea outline: [`sparse-aware/IDEA.md`](sparse-aware/IDEA.md) · Code, tests and how to run: [`sparse-aware/sw/`](sparse-aware/sw/README.md)
+
+## In short
+
+- **Problem:** row-by-row CSR SpMV on a vector unit pays a costly reduction (about 30+ cycles) for **every row**, so at high sparsity most of the time goes into overhead for very short rows.
+- **Idea:** process all non-zeros as one flat stream, in windows of one vector register. A tail-flag bitmap (sparse metadata) marks where each row ends. A **segmented running sum** puts every row's total at its last element, and a masked scatter writes the totals to y.
+- **New instruction:** `vfsegsum.vv vd, vs2, v0.t` (FP32) and `vsegsum.vv` (int32):
+  `acc += vs2[i]; vd[i] = acc; if (v0[i]) acc = 0;`
+- **Hardware:** built in Ara's **mask unit**, the only block that sees all lanes' elements in order. It adds 8 chained FP32 adders, a running-sum register carried between 8-element words, and a timing model of a pipelined adder tree. The decoder, op list, lane sequencer and lane ALU get small changes. No new inter-block wiring.
+- **Results** (Verilator RTL simulation, 43 matrices × SpMV + SpMM, 430 kernel runs, all correct):
+  - **2.0× (SpMV) / 1.9× (SpMM)** geomean speedup over the best kernel on unmodified Ara at 75–99% sparsity;
+  - up to **7.9×** at 99.9% sparsity;
+  - sparse execution beats dense from **75–90% sparsity** (n = 128).
+
+<p align="center"><img src="sparse-aware/figures/speedup.png" width="85%"></p>
+
+## What changed relative to upstream Ara
+
+| Area | Files |
+|---|---|
+| New instruction (RTL) | `hardware/include/ara_pkg.sv`, `hardware/src/ara_dispatcher.sv`, `hardware/src/lane/lane_sequencer.sv`, `hardware/src/lane/simd_alu.sv`, `hardware/src/masku/masku.sv` |
+| Testbench (ROI counters, testbench only) | `hardware/tb/ara_testharness.sv` |
+| Build fixes | `Makefile`, `apps/riscv-tests/benchmarks/common/test.ld` |
+| Kernels, unit test, evaluation scripts, matrices, results | `sparse-aware/sw/` |
+| Documentation | `sparse-aware/README.md`, `sparse-aware/IDEA.md` |
+
+Use `git log` or GitHub's compare view against upstream `pulp-platform/ara` to see the exact diff.
+
+## Credits
+
+Course project for Computer Architecture. Team: _(add names)_. The sparse-aware instruction (`vfsegsum`), its kernels and its evaluation were my part. Build fixes and testbench counters were shared team infrastructure. Built on Ara and CVA6 by the PULP Platform team (ETH Zürich / University of Bologna), under their original licenses.
+
+---
+
+# Original Ara README
+
+## Ara
 
 [![ci](https://github.com/pulp-platform/ara/actions/workflows/ci.yml/badge.svg)](https://github.com/pulp-platform/ara/actions/workflows/ci.yml)
 
