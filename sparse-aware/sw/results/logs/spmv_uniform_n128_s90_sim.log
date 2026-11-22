@@ -1,0 +1,32 @@
+Program header number 0 in `runs_eval_spmv/uniform_n128_s90/app' low is 80000000
+Program header number 0 in `runs_eval_spmv/uniform_n128_s90/app' high is 800018ef
+Program header number 1 in `runs_eval_spmv/uniform_n128_s90/app' high is 80001e0f
+Program header number 2 in `runs_eval_spmv/uniform_n128_s90/app' high is 80018fe7
+Program header number 3 in `runs_eval_spmv/uniform_n128_s90/app' is not of type PT_LOAD; ignoring.
+Program header number 4 in `runs_eval_spmv/uniform_n128_s90/app' is not of type PT_LOAD; ignoring.
+Set `ram TOP.ara_tb_verilator.dut.i_ara_soc.i_dram 10 0x80000000 0x100000 write with offset: 0x0 write with size: 0x18fe8
+Simulation of Ara
+=================
+
+
+Simulation running, end by pressing CTRL-c.
+[roi-counters] cycles=29875 ara_ar=0 ara_ar_bytes=0 ara_r_beats=0 ara_aw=0 ara_w_beats=0 cva6_ar=356 cva6_r_beats=706 cva6_aw=130 cva6_w_beats=130 dc_loads=5431 dc_misses=351
+RES kernel=scalar_csr n=128 nnz=1638 cycles=29820 PASS
+[roi-counters] cycles=18396 ara_ar=256 ara_ar_bytes=131072 ara_r_beats=8192 ara_aw=128 ara_w_beats=128 cva6_ar=1 cva6_r_beats=2 cva6_aw=2 cva6_w_beats=2 dc_loads=13 dc_misses=1
+RES kernel=rvv_dense n=128 nnz=1638 cycles=18356 PASS
+[roi-counters] cycles=12776 ara_ar=1896 ara_ar_bytes=22840 ara_r_beats=2656 ara_aw=0 ara_w_beats=0 cva6_ar=2 cva6_r_beats=3 cva6_aw=130 cva6_w_beats=130 dc_loads=646 dc_misses=2
+RES kernel=ara_csr n=128 nnz=1638 cycles=12750 PASS
+[roi-counters] cycles=9197 ara_ar=1696 ara_ar_bytes=26448 ara_r_beats=2883 ara_aw=1641 ara_w_beats=1672 cva6_ar=2 cva6_r_beats=3 cva6_aw=6 cva6_w_beats=6 dc_loads=101 dc_misses=2
+RES kernel=segred_hw n=128 nnz=1638 cycles=9158 PASS
+[roi-counters] cycles=13872 ara_ar=256 ara_ar_bytes=131072 ara_r_beats=8192 ara_aw=0 ara_w_beats=0 cva6_ar=1 cva6_r_beats=2 cva6_aw=130 cva6_w_beats=130 dc_loads=270 dc_misses=1
+RES kernel=ara_dense n=128 nnz=1638 cycles=13846 PASS
+[hw-cycles]:       54032
+[812906] -Info: ara_tb_verilator.sv:51: TOP.ara_tb_verilator: Core Test *** SUCCESS *** (tohost = 0)
+- <ara>/hardware/tb/ara_tb_verilator.sv:54: Verilog $finish
+Received $finish() from Verilog, shutting down simulation.
+
+Simulation statistics
+=====================
+Executed cycles:  633b5
+Wallclock time:   165.493 s
+Simulation speed: 2456.01 cycles/s (2.45601 kHz)

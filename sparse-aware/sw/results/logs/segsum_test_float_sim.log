@@ -1,0 +1,66 @@
+Program header number 0 in `<outdir>/app' low is 80000000
+Program header number 0 in `<outdir>/app' high is 800012bd
+Program header number 1 in `<outdir>/app' high is 800012c3
+Program header number 2 in `<outdir>/app' high is 800017df
+Program header number 3 in `<outdir>/app' high is 80001e47
+Program header number 4 in `<outdir>/app' is not of type PT_LOAD; ignoring.
+Program header number 5 in `<outdir>/app' is not of type PT_LOAD; ignoring.
+Set `ram TOP.ara_tb_verilator.dut.i_ara_soc.i_dram 10 0x80000000 0x100000 write with offset: 0x0 write with size: 0x1e48
+Simulation of Ara
+=================
+
+
+Simulation running, end by pressing CTRL-c.
+segsum_test MODE=2
+SEGSUM no_flags vl=1 PASS
+SEGSUM no_flags vl=7 PASS
+SEGSUM no_flags vl=8 PASS
+SEGSUM no_flags vl=9 PASS
+SEGSUM no_flags vl=31 PASS
+SEGSUM no_flags vl=64 PASS
+SEGSUM no_flags vl=127 PASS
+SEGSUM no_flags vl=128 PASS
+SEGSUM all_flags vl=1 PASS
+SEGSUM all_flags vl=7 PASS
+SEGSUM all_flags vl=8 PASS
+SEGSUM all_flags vl=9 PASS
+SEGSUM all_flags vl=31 PASS
+SEGSUM all_flags vl=64 PASS
+SEGSUM all_flags vl=127 PASS
+SEGSUM all_flags vl=128 PASS
+SEGSUM last_flag vl=1 PASS
+SEGSUM last_flag vl=7 PASS
+SEGSUM last_flag vl=8 PASS
+SEGSUM last_flag vl=9 PASS
+SEGSUM last_flag vl=31 PASS
+SEGSUM last_flag vl=64 PASS
+SEGSUM last_flag vl=127 PASS
+SEGSUM last_flag vl=128 PASS
+SEGSUM every3 vl=1 PASS
+SEGSUM every3 vl=7 PASS
+SEGSUM every3 vl=8 PASS
+SEGSUM every3 vl=9 PASS
+SEGSUM every3 vl=31 PASS
+SEGSUM every3 vl=64 PASS
+SEGSUM every3 vl=127 PASS
+SEGSUM every3 vl=128 PASS
+SEGSUM random_flags vl=1 PASS
+SEGSUM random_flags vl=7 PASS
+SEGSUM random_flags vl=8 PASS
+SEGSUM random_flags vl=9 PASS
+SEGSUM random_flags vl=31 PASS
+SEGSUM random_flags vl=64 PASS
+SEGSUM random_flags vl=127 PASS
+SEGSUM random_flags vl=128 PASS
+SEGSUM plan_example vl=6 PASS
+SEGSUM ALL PASS
+[hw-cycles]:           0
+[699342] -Info: ara_tb_verilator.sv:51: TOP.ara_tb_verilator: Core Test *** SUCCESS *** (tohost = 0)
+- <ara>/hardware/tb/ara_tb_verilator.sv:54: Verilog $finish
+Received $finish() from Verilog, shutting down simulation.
+
+Simulation statistics
+=====================
+Executed cycles:  555e7
+Wallclock time:   54.346 s
+Simulation speed: 6434.16 cycles/s (6.43416 kHz)
