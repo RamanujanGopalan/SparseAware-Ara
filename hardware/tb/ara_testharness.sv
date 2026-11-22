@@ -208,6 +208,64 @@ module ara_testharness #(
 
 `ifndef IDEAL_DISPATCHER
 
+  /****************************************************
+   *  ROI MEMORY COUNTERS (added for the SpMV study)  *
+   ****************************************************/
+
+  // Testbench only: reads existing signals, changes nothing in the design.
+  // Counts while software holds hw_cnt_en (HW_CNT_READY ... HW_CNT_NOT_READY)
+  // and prints one "[roi-counters]" line each time that flag falls.
+  //   ara_*  : Ara's own AXI port (all vector loads/stores; no cache on this path)
+  //   cva6_* : CVA6's AXI port, i.e. traffic below its L1 caches
+  //   dc_*   : CVA6 L1 D-cache load requests accepted (load-unit port) and misses
+  longint unsigned roi_cycles, ara_ar, ara_ar_bytes, ara_r_beats, ara_aw, ara_w_beats;
+  longint unsigned cva6_ar, cva6_r_beats, cva6_aw, cva6_w_beats, dc_loads, dc_misses;
+  logic roi_q;
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      roi_q <= 1'b0;
+      {roi_cycles, ara_ar, ara_ar_bytes, ara_r_beats, ara_aw, ara_w_beats} <= '0;
+      {cva6_ar, cva6_r_beats, cva6_aw, cva6_w_beats, dc_loads, dc_misses}  <= '0;
+    end else begin
+      roi_q <= cnt_en_mask;
+      if (cnt_en_mask) begin
+        roi_cycles <= roi_cycles + 1;
+        if (i_ara_soc.i_system.ara_axi_req.ar_valid && i_ara_soc.i_system.ara_axi_resp.ar_ready) begin
+          ara_ar       <= ara_ar + 1;
+          ara_ar_bytes <= ara_ar_bytes + ((longint'(i_ara_soc.i_system.ara_axi_req.ar.len) + 1)
+                                          << i_ara_soc.i_system.ara_axi_req.ar.size);
+        end
+        if (i_ara_soc.i_system.ara_axi_resp.r_valid && i_ara_soc.i_system.ara_axi_req.r_ready)
+          ara_r_beats <= ara_r_beats + 1;
+        if (i_ara_soc.i_system.ara_axi_req.aw_valid && i_ara_soc.i_system.ara_axi_resp.aw_ready)
+          ara_aw <= ara_aw + 1;
+        if (i_ara_soc.i_system.ara_axi_req.w_valid && i_ara_soc.i_system.ara_axi_resp.w_ready)
+          ara_w_beats <= ara_w_beats + 1;
+        if (i_ara_soc.i_system.ariane_axi_req.ar_valid && i_ara_soc.i_system.ariane_axi_resp.ar_ready)
+          cva6_ar <= cva6_ar + 1;
+        if (i_ara_soc.i_system.ariane_axi_resp.r_valid && i_ara_soc.i_system.ariane_axi_req.r_ready)
+          cva6_r_beats <= cva6_r_beats + 1;
+        if (i_ara_soc.i_system.ariane_axi_req.aw_valid && i_ara_soc.i_system.ariane_axi_resp.aw_ready)
+          cva6_aw <= cva6_aw + 1;
+        if (i_ara_soc.i_system.ariane_axi_req.w_valid && i_ara_soc.i_system.ariane_axi_resp.w_ready)
+          cva6_w_beats <= cva6_w_beats + 1;
+        if (i_ara_soc.i_system.i_ariane.dcache_req_ports_ex_cache[1].data_req &&
+            i_ara_soc.i_system.i_ariane.dcache_req_ports_cache_ex[1].data_gnt)
+          dc_loads <= dc_loads + 1;
+        if (i_ara_soc.i_system.i_ariane.dcache_miss_cache_perf)
+          dc_misses <= dc_misses + 1;
+      end
+      if (roi_q && !cnt_en_mask) begin
+        $display("[roi-counters] cycles=%0d ara_ar=%0d ara_ar_bytes=%0d ara_r_beats=%0d ara_aw=%0d ara_w_beats=%0d cva6_ar=%0d cva6_r_beats=%0d cva6_aw=%0d cva6_w_beats=%0d dc_loads=%0d dc_misses=%0d",
+                 roi_cycles, ara_ar, ara_ar_bytes, ara_r_beats, ara_aw, ara_w_beats,
+                 cva6_ar, cva6_r_beats, cva6_aw, cva6_w_beats, dc_loads, dc_misses);
+        {roi_cycles, ara_ar, ara_ar_bytes, ara_r_beats, ara_aw, ara_w_beats} <= '0;
+        {cva6_ar, cva6_r_beats, cva6_aw, cva6_w_beats, dc_loads, dc_misses}  <= '0;
+      end
+    end
+  end
+
   /*******************
    *  CVA6 PERF CNT  *
    *******************/

@@ -87,6 +87,8 @@ toolchain-llvm-main: git-submodules Makefile
 	-DCMAKE_CXX_COMPILER=$(CXX) \
 	-DLLVM_DEFAULT_TARGET_TRIPLE=riscv64-unknown-elf \
 	-DLLVM_TARGETS_TO_BUILD="RISCV" \
+	-DLLVM_PARALLEL_COMPILE_JOBS=4 \
+	-DLLVM_PARALLEL_LINK_JOBS=1 \
 	../llvm
 	cd $(ROOT_DIR)/toolchain/riscv-llvm && \
 	$(CMAKE) --build build --target install
@@ -117,6 +119,9 @@ toolchain-llvm-rt: git-submodules Makefile toolchain-llvm-main toolchain-llvm-ne
 	-DCOMPILER_RT_BUILD_PROFILE=OFF \
 	-DCOMPILER_RT_BUILD_SANITIZERS=OFF \
 	-DCOMPILER_RT_BUILD_XRAY=OFF \
+	-DCOMPILER_RT_BUILD_CTX_PROFILE=OFF \
+	-DCOMPILER_RT_BUILD_ORC=OFF \
+	-DCOMPILER_RT_BUILD_GWP_ASAN=OFF \
 	-DCMAKE_C_COMPILER_WORKS=1 \
 	-DCMAKE_CXX_COMPILER_WORKS=1 \
 	-DCMAKE_SIZEOF_VOID_P=4 \
@@ -149,7 +154,7 @@ ${ISA_SIM_MOD_INSTALL_DIR}: Makefile patches/0003-riscv-isa-sim-patch ${ISA_SIM_
 	PATH=$(ISA_SIM_MOD_INSTALL_DIR)/bin:$$PATH; cd ..; \
 	../configure --prefix=$(ISA_SIM_MOD_INSTALL_DIR) \
 	--without-boost --without-boost-asio --without-boost-regex && \
-	make -j32 && make install; \
+	make -j4 && make install; \
 	git stash
 
 ${ISA_SIM_INSTALL_DIR}: Makefile
@@ -164,7 +169,7 @@ ${ISA_SIM_INSTALL_DIR}: Makefile
 	PATH=$(ISA_SIM_INSTALL_DIR)/bin:$$PATH; cd ..; \
 	../configure --prefix=$(ISA_SIM_INSTALL_DIR) \
 	--without-boost --without-boost-asio --without-boost-regex && \
-	make -j32 && make install
+	make -j4 && make install
 
 # Verilator
 .PHONY: verilator
@@ -176,7 +181,7 @@ ${VERIL_INSTALL_DIR}: Makefile
 	# Compile verilator
 	cd $(CURDIR)/toolchain/verilator && git clean -xfdf && autoconf && \
 	CC=$(CLANG_CC) CXX=$(CLANG_CXX) CXXFLAGS=$(CLANG_CXXFLAGS) LDFLAGS=$(CLANG_LDFLAGS) \
-		./configure --prefix=$(VERIL_INSTALL_DIR) && make -j8 && make install
+		./configure --prefix=$(VERIL_INSTALL_DIR) && make -j4 && make install
 
 # RISC-V Tests
 riscv_tests:

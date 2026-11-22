@@ -32,7 +32,7 @@ SECTIONS
   .text : { *(.text) }
 
   /* data segment */
-  .data : { *(.data) }
+  .data : { *(.data .data.*) }
 
   .sdata : {
     __global_pointer$ = . + 0x800;
@@ -45,18 +45,18 @@ SECTIONS
     *(.sbss .sbss.* .gnu.linkonce.sb.*)
     *(.scommon)
   }
-  .bss : { *(.bss) }
+  .bss : { *(.bss .bss.*) }
 
   /* thread-local data segment */
   .tdata :
   {
     _tdata_begin = .;
-    *(.tdata)
+    *(.tdata .tdata.*)
     _tdata_end = .;
   }
   .tbss :
   {
-    *(.tbss)
+    *(.tbss .tbss.*)
     _tbss_end = .;
   }
 
