@@ -5,6 +5,13 @@
 // Author: Matheus Cavalcante <matheusd@iis.ee.ethz.ch>
 // Description:
 // Ara's SIMD ALU, operating on elements 64-bit wide, and generating 64 bits per cycle.
+//
+// segsum modification (segmented-sum instructions vfsegsum.vv / vsegsum.vv vd, vs2, v0.t):
+//   For each element i < vl: acc += vs2[i]; vd[i] = acc; if v0[i] then acc = 0.
+//   v0 marks the last non-zero of each matrix row, so each row total lands at its last element
+//   (segmented reduction for SpMV/SpMM). Changes are marked VSEGSUM / VFSEGSUM / seg_ in the code.
+//   Full description: sparse-aware/IDEA.md.
+//   In this file: the lane ALU passes vs2 through to the mask unit for VSEGSUM / VFSEGSUM.
 
 module simd_alu import ara_pkg::*; import rvv_pkg::*; #(
     // Support for fixed-point data types
@@ -134,6 +141,8 @@ module simd_alu import ara_pkg::*; import rvv_pkg::*; #(
 
         // Mask operands pass-through
         VCPOP, VFIRST, VMSBF, VMSOF, VMSIF, VIOTA: res = operand_b_i;
+        // Segmented sum: the lanes only forward vs2, the MASKU adds
+        VSEGSUM, VFSEGSUM: res = operand_b_i;
 
         // Mask operands pass-through
         VRGATHER, VRGATHEREI16, VCOMPRESS: res = operand_a_i;

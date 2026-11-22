@@ -5,6 +5,13 @@
 // Author: Matheus Cavalcante <matheusd@iis.ee.ethz.ch>
 // Description:
 // Ara's main package, containing most of the definitions for its usage.
+//
+// segsum modification (segmented-sum instructions vfsegsum.vv / vsegsum.vv vd, vs2, v0.t):
+//   For each element i < vl: acc += vs2[i]; vd[i] = acc; if v0[i] then acc = 0.
+//   v0 marks the last non-zero of each matrix row, so each row total lands at its last element
+//   (segmented reduction for SpMV/SpMM). Changes are marked VSEGSUM / VFSEGSUM / seg_ in the code.
+//   Full description: sparse-aware/IDEA.md.
+//   In this file: the new operations VSEGSUM, VFSEGSUM, placed in the mask-unit op range.
 
 package ara_pkg;
 
@@ -154,6 +161,8 @@ package ara_pkg;
     VMSEQ, VMSNE, VMSLTU, VMSLT, VMSLEU, VMSLE, VMSGTU, VMSGT,
     // Integer add-with-carry and subtract-with-borrow carry-out instructions
     VMADC, VMSBC,
+    // Segmented sum (SpMV project): running sum that restarts after each v0 flag
+    VSEGSUM, VFSEGSUM,
     // Mask to mask
     VMSBF, VMSOF, VMSIF,
     // Mask to non-mask

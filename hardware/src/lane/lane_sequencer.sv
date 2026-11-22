@@ -7,6 +7,13 @@
 // This is the sequencer of one lane. It controls the execution of one vector
 // instruction within one lane, interfacing with the internal functional units
 // and with the main sequencer.
+//
+// segsum modification (segmented-sum instructions vfsegsum.vv / vsegsum.vv vd, vs2, v0.t):
+//   For each element i < vl: acc += vs2[i]; vd[i] = acc; if v0[i] then acc = 0.
+//   v0 marks the last non-zero of each matrix row, so each row total lands at its last element
+//   (segmented reduction for SpMV/SpMM). Changes are marked VSEGSUM / VFSEGSUM / seg_ in the code.
+//   Full description: sparse-aware/IDEA.md.
+//   In this file: vs2 is read as normal vsew-bit elements for VSEGSUM / VFSEGSUM.
 
 module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::idx_width; #(
     parameter int unsigned NrLanes               = 0,
@@ -793,7 +800,8 @@ module lane_sequencer import ara_pkg::*; import rvv_pkg::*; import cf_math_pkg::
           // extra operand regardless of whether it is valid in this lane or not.
 
           // Integer comparisons run on the ALU and then get reshuffled and masked in the MASKU
-          if (pe_req.op inside {[VMSEQ:VMSBC]}) begin
+          // Segmented sum: vs2 is read as normal vsew-bit elements (not as a mask), like the compares
+          if (pe_req.op inside {[VMSEQ:VMSBC], [VSEGSUM:VFSEGSUM]}) begin
             // These source regs contain non-mask vectors.
             operand_request[AluB].eew = pe_req.eew_vs2;
             operand_request[AluB].vl  = pe_req.vl / NrLanes;

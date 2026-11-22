@@ -7,6 +7,13 @@
 // Ara's dispatcher interfaces Ariane's requests with the vector lanes.
 // It also acknowledges instructions back to Ariane, perhaps with a
 // response or an error message.
+//
+// segsum modification (segmented-sum instructions vfsegsum.vv / vsegsum.vv vd, vs2, v0.t):
+//   For each element i < vl: acc += vs2[i]; vd[i] = acc; if v0[i] then acc = 0.
+//   v0 marks the last non-zero of each matrix row, so each row total lands at its last element
+//   (segmented reduction for SpMV/SpMM). Changes are marked VSEGSUM / VFSEGSUM / seg_ in the code.
+//   Full description: sparse-aware/IDEA.md.
+//   In this file: decode (OPMVV / OPFVV funct6 010001) and legality checks (vm = 0, vd != v0, SEW = 32).
 
 module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
     parameter int           unsigned NrLanes            = 0,
@@ -1582,6 +1589,19 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                   6'b001001: ara_req.op = ara_pkg::VAADD;
                   6'b001010: ara_req.op = ara_pkg::VASUBU;
                   6'b001011: ara_req.op = ara_pkg::VASUB;
+                  // vsegsum.vv vd, vs2, v0.t (SpMV project, funct6 unused by RVV 1.0)
+                  // Running sum of vs2 that restarts after every element whose v0 bit is set.
+                  // Runs in the MASKU; the lanes only forward vs2. vs1 is not used.
+                  6'b010001: begin
+                    ara_req.op        = ara_pkg::VSEGSUM;
+                    ara_req.use_vs1   = 1'b0;
+                    ara_req.use_vd_op = 1'b0;
+                    ara_req.emul      = csr_vtype_q.vlmul;
+                    // v0 holds the flags, so the encoding must be "masked" and vd cannot be v0
+                    if (insn.varith_type.vm || insn.varith_type.rd == 5'b0) illegal_insn = 1'b1;
+                    // The MASKU adder works on 32-bit elements only
+                    if (csr_vtype_q.vsew != EW32) illegal_insn = 1'b1;
+                  end
                   6'b010111: begin
                     ara_req.op = ara_pkg::VCOMPRESS;
                     // Correctly deshuffle vs1 (it gets deshuffled with eew_vs2)
@@ -2174,6 +2194,14 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
                       // When performing a floating-point add/sub, fpnew adds the second and the third
                       // operand. Send the first operand (vs2) to the third result queue.
                       ara_req.swap_vs2_vd_op = 1'b1;
+                    end
+                    // vfsegsum.vv vd, vs2, v0.t (SpMV project): FP32 version of vsegsum.vv
+                    6'b010001: begin
+                      ara_req.op        = ara_pkg::VFSEGSUM;
+                      ara_req.use_vs1   = 1'b0;
+                      ara_req.use_vd_op = 1'b0;
+                      if (insn.varith_type.vm || insn.varith_type.rd == 5'b0) illegal_insn = 1'b1;
+                      if (csr_vtype_q.vsew != EW32) illegal_insn = 1'b1;
                     end
                     6'b000001: begin
                       ara_req.op             = ara_pkg::VFREDUSUM;
@@ -3631,6 +3659,7 @@ module ara_dispatcher import ara_pkg::*; import rvv_pkg::*; #(
 
         // Is the instruction an in-lane one and could it be subject to reshuffling?
         in_lane_op = ara_req.op inside {[VADD:VMERGE]} || ara_req.op inside {[VREDSUM:VMSBC]} ||
+                     ara_req.op inside {[VSEGSUM:VFSEGSUM]} ||   // segmented sum: lanes read vs2 and forward it to the MASKU
                      ara_req.op inside {[VMANDNOT:VMXNOR]} || ara_req.op inside {[VMVXS:VSLIDEDOWN]};
         // Annotate which registers need a reshuffle -> |vs1|vs2|vd|
         // Optimization: reshuffle vs1 and vs2 only if the operation is strictly in-lane

@@ -9,6 +9,14 @@
 // then sends back to them whether the elements are predicated or not.
 // This unit is shared between all the functional units who can execute
 // predicated instructions.
+//
+// segsum modification (segmented-sum instructions vfsegsum.vv / vsegsum.vv vd, vs2, v0.t):
+//   For each element i < vl: acc += vs2[i]; vd[i] = acc; if v0[i] then acc = 0.
+//   v0 marks the last non-zero of each matrix row, so each row total lands at its last element
+//   (segmented reduction for SpMV/SpMM). Changes are marked VSEGSUM / VFSEGSUM / seg_ in the code.
+//   Full description: sparse-aware/IDEA.md.
+//   In this file: 8 chained FP32 adders (fpnew) and 8 int32 adders, the running-sum register
+//   seg_acc_q, the timing model of a pipelined adder tree (seg_wait_q), and counters reusing viota's path.
 
 module masku import ara_pkg::*; import rvv_pkg::*; #(
     parameter  int  unsigned NrLanes   = 0,
@@ -189,6 +197,34 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
   // BE signals for VIOTA
   logic [NrLanes*DataWidth/8-1:0] be_viota_seq_d, be_viota_seq_q, be_vrgat_seq_d, be_vrgat_seq_q;
   logic [NrLanes*DataWidth/8-1:0] be_masku_alu_shuf;
+
+  // VSEGSUM / VFSEGSUM (segmented running sum, SpMV project)
+  //
+  // 32-bit elements only. One full VRF word (NrLanes*64 bits = SegElms elements) per cycle.
+  localparam int unsigned SegElms = NrLanes * DataWidth / 32;
+  // Running sum carried from one word to the next (reset at the end of the instruction)
+  logic [31:0] seg_acc, seg_acc_d, seg_acc_q;
+  // Tail flags of the current word, in element order
+  logic [SegElms-1:0] seg_flag;
+
+  // VFSEGSUM timing model (step 5).
+  // The adders below are written combinationally (all SegElms adds in one cycle), which a real
+  // chip cannot do. The hardware this models is a pipelined segmented adder tree:
+  //   - log2(SegElms) tree levels + 1 carry-in level, each one FP add of LatFCompEW32 cycles
+  //     -> SegFpFill = 16 cycles from the first operand word to its result;
+  //   - the only loop is the carry from one word to the next (one FP add)
+  //     -> a new word every SegFpII = 4 cycles.
+  // So: after the first word arrives, wait SegFpFill cycles, then accept one word every SegFpII cycles.
+  localparam int unsigned SegFpII   = LatFCompEW32;
+  localparam int unsigned SegFpFill = ($clog2(SegElms) + 1) * LatFCompEW32;
+  logic [$clog2(SegFpFill+1)-1:0] seg_wait_d, seg_wait_q;   // cycles left before the next word may go
+  logic seg_started_d, seg_started_q;                         // first word of this VFSEGSUM has arrived
+  logic seg_go;                                               // VFSEGSUM may process a word this cycle
+  // VFSEGSUM: chain of SegElms FP32 adders (fpnew, ADD mode).
+  // Adder i computes seg_fp_in[i] + element i; its input is the previous adder's
+  // sum, or +0 if the previous element was a row end.
+  logic [SegElms-1:0][31:0] seg_fp_in, seg_fp_sum;
+
 
   // Local Parameter VcpopParallelism and VfirstParallelism
   //
@@ -628,6 +664,45 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
     end
   end
 
+  // VFSEGSUM FP32 adder chain (see the VSEGSUM declarations above)
+  for (genvar i = 0; i < SegElms; i++) begin : gen_seg_fp_add
+    // Tail flag of element i of the current word: the next SegElms bits of v0, in element order
+    assign seg_flag[i] = masku_operand_m_seq[in_m_ready_cnt_q[idx_width(NrLanes*DataWidth/SegElms)-1:0] * SegElms + i];
+    if (i == 0) begin : gen_first
+      assign seg_fp_in[i] = seg_acc_q;
+    end else begin : gen_next
+      assign seg_fp_in[i] = seg_flag[i-1] ? 32'h0 : seg_fp_sum[i-1];
+    end
+    fpnew_fma #(
+      .FpFormat   (fpnew_pkg::FP32),
+      .NumPipeRegs(0              ), // combinational; the FP latency is modelled by seg_wait_q (see SegFpFill)
+      .PipeConfig (fpnew_pkg::BEFORE)
+    ) i_seg_fp_add (
+      .clk_i,
+      .rst_ni,
+      .operands_i     ({masku_operand_alu_seq[i*32 +: 32], seg_fp_in[i], 32'h0}), // ADD: op[1] + op[2]
+      .is_boxed_i     (3'b111                                ),
+      .rnd_mode_i     (vinsn_issue.fp_rm                     ),
+      .op_i           (fpnew_pkg::ADD                        ),
+      .op_mod_i       (1'b0                                  ),
+      .tag_i          (1'b0                                  ),
+      .mask_i         (1'b0                                  ),
+      .aux_i          (1'b0                                  ),
+      .in_valid_i     (1'b1                                  ),
+      .in_ready_o     (/* unused */                          ),
+      .flush_i        (1'b0                                  ),
+      .result_o       (seg_fp_sum[i]                         ),
+      .status_o       (/* unused */                          ),
+      .extension_bit_o(/* unused */                          ),
+      .tag_o          (/* unused */                          ),
+      .mask_o         (/* unused */                          ),
+      .aux_o          (/* unused */                          ),
+      .out_valid_o    (/* unused */                          ),
+      .out_ready_i    (1'b1                                  ),
+      .busy_o         (/* unused */                          )
+    );
+  end
+
   ////////////////
   //  Mask ALU  //
   ////////////////
@@ -703,6 +778,9 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
     viota_acc   = viota_acc_q;
     viota_acc_d = viota_acc_q;
     for (int i = 0; i < ViotaParallelism; i++) viota_res[i] = '0;
+    // VSEGSUM default assignments
+    seg_acc   = seg_acc_q;
+    seg_acc_d = seg_acc_q;
 
     be_vrgat_seq_d = be_vrgat_seq_q;
 
@@ -855,6 +933,23 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
 
           alu_result_vm_m = vrgat_res;
         end
+        // VSEGSUM, VFSEGSUM: segmented running sum over one full VRF word per cycle
+        // Rule: acc += vs2[i]; vd[i] = acc; if v0[i] then acc = 0
+        // SegElms chained adders; v0 bits come in order, SegElms new bits per cycle
+        [VSEGSUM:VFSEGSUM]: begin
+          if (vinsn_issue.op == VFSEGSUM) begin
+            // FP: the sums come from the adder chain above
+            for (int i = 0; i < SegElms; i++) alu_result_vm_m[i*32 +: 32] = seg_fp_sum[i];
+            seg_acc = seg_flag[SegElms-1] ? '0 : seg_fp_sum[SegElms-1];
+          end else begin
+            // Integer
+            for (int i = 0; i < SegElms; i++) begin
+              seg_acc = seg_acc + masku_operand_alu_seq[i*32 +: 32];
+              alu_result_vm_m[i*32 +: 32] = seg_acc;
+              if (seg_flag[i]) seg_acc = '0;
+            end
+          end
+        end
         // VCPOP, VFIRST: mask the current slice and feed the popc or lzc unit
         [VCPOP:VFIRST] : begin
           vcpop_operand = (!vinsn_issue.vm) ? masku_operand_alu_seq & masku_operand_m_seq : masku_operand_alu_seq;
@@ -880,7 +975,8 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
     alu_result = alu_result_vm_shuf;
 
     // Prepare the background data with vtype.vsew encoding
-    result_queue_mask_seq = vinsn_issue.op inside {[VIOTA:VID], [VRGATHER:VCOMPRESS]} ? '0 : masku_operand_m_seq | {NrLanes*DataWidth{vinsn_issue.vm}} | {NrLanes*DataWidth{vinsn_issue.op inside {[VMADC:VMSBC]}}};
+    // VSEGSUM/VFSEGSUM write every element (v0 holds the flags, not a write mask), like viota
+    result_queue_mask_seq = vinsn_issue.op inside {[VIOTA:VID], [VSEGSUM:VFSEGSUM], [VRGATHER:VCOMPRESS]} ? '0 : masku_operand_m_seq | {NrLanes*DataWidth{vinsn_issue.vm}} | {NrLanes*DataWidth{vinsn_issue.op inside {[VMADC:VMSBC]}}};
     background_data_init_seq = masku_operand_vd_seq | result_queue_mask_seq;
     background_data_init_shuf = '0;
     for (int b = 0; b < (NrLanes*StrbWidth); b++) begin
@@ -1250,7 +1346,7 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
         wdata: result_queue_q[result_queue_write_pnt_q][lane].wdata, // Retain the last-cycle's data
 		// VIOTA, VID generate a non-mask vector and should comply with undisturbed policy
         // This means that we can use the byte-enable signal
-        be   : vinsn_issue.op inside {[VIOTA:VID],[VRGATHER:VCOMPRESS]}
+        be   : vinsn_issue.op inside {[VIOTA:VID],[VSEGSUM:VFSEGSUM],[VRGATHER:VCOMPRESS]}
                ? be(elm_per_lane + additional_elm[lane], vinsn_issue.vtype.vsew) & be_masku_alu_shuf[lane*StrbWidth +: StrbWidth]
                : '1,
         addr : vaddr(vinsn_issue.vd, NrLanes, VLEN) + iteration_cnt_q,
@@ -1258,8 +1354,25 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
       };
     end
 
+    // VFSEGSUM timing model: count down, start the fill wait when the first word arrives
+    seg_wait_d    = (seg_wait_q != '0) ? seg_wait_q - 1 : '0;
+    seg_started_d = seg_started_q;
+    seg_go        = 1'b1;
+    if (vinsn_issue_valid && vinsn_issue.op == VFSEGSUM) begin
+      if (!seg_started_q) begin
+        seg_go = 1'b0;
+        if (&masku_operand_alu_valid) begin
+          seg_started_d = 1'b1;
+          seg_wait_d    = SegFpFill - 1;
+        end
+      end else begin
+        seg_go = (seg_wait_q == '0);
+      end
+    end
+
     // Is there an instruction ready to be issued?
-    if (vinsn_issue_valid && vinsn_issue.op inside {[VMFEQ:VCOMPRESS]}) begin
+    // seg_go holds VFSEGSUM back while the modelled adder pipeline is busy (always 1 for other ops)
+    if (vinsn_issue_valid && vinsn_issue.op inside {[VMFEQ:VCOMPRESS]} && seg_go) begin
       // Compute one slice if we can write and the necessary inputs are valid
       // VID does not require any operand, while VRGATHER/VCOMPRESS's ALU operand is just preprocessed to get the indices.
       // Therefore, VRGATHER/VCOMPRESS's operand are special. Only the vd operand works in the MASKU ALU.
@@ -1274,7 +1387,7 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
         for (int unsigned lane = 0; lane < NrLanes; lane++) begin
           result_queue_background_data[lane] = (out_valid_cnt_q != '0)
                                              ? result_queue_q[result_queue_write_pnt_q][lane].wdata
-                                             : vinsn_issue.op inside {[VIOTA:VID], [VRGATHER:VCOMPRESS]} ? '1 : background_data_init_shuf[lane*DataWidth +: DataWidth];
+                                             : vinsn_issue.op inside {[VIOTA:VID], [VSEGSUM:VFSEGSUM], [VRGATHER:VCOMPRESS]} ? '1 : background_data_init_shuf[lane*DataWidth +: DataWidth];
         end
         for (int unsigned lane = 0; lane < NrLanes; lane++) begin
           // The alu_result has all the bits at 1 except for the portion of bits to write.
@@ -1288,6 +1401,8 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
         // Bump MASKU ALU state
         found_one_d = found_one;
         viota_acc_d = viota_acc;
+        seg_acc_d   = seg_acc;                                   // carry the running sum to the next word
+        if (vinsn_issue.op == VFSEGSUM) seg_wait_d = SegFpII - 1;
         vrf_pnt_d   = vrf_pnt_q + delta_elm_q;
         if (vinsn_issue.op inside {[VRGATHER:VCOMPRESS]}) vrgat_idx_fifo_pop = 1'b1;
 
@@ -1347,6 +1462,10 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
           be_viota_seq_d = '1; // Default: write
           be_vrgat_seq_d = '1; // Default: write
           viota_acc_d    = '0;
+          // End of the instruction: clear the segmented-sum state
+          seg_acc_d      = '0;
+          seg_started_d  = 1'b0;
+          seg_wait_d     = '0;
           found_one_d    = '0;
         end
       end
@@ -1370,7 +1489,8 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
 
       // Account for the written results
       // VIOTA and VID do not write bits!
-      processing_cnt_d = vinsn_issue.op inside {[VIOTA:VID], [VRGATHER:VRGATHEREI16]} ? processing_cnt_q - ((NrLanes * DataWidth / 8) >> vinsn_issue.vtype.vsew) : processing_cnt_q - NrLanes * DataWidth;
+      // VSEGSUM/VFSEGSUM consume one VRF word of vsew-bit elements per step, like viota
+      processing_cnt_d = vinsn_issue.op inside {[VIOTA:VID], [VSEGSUM:VFSEGSUM], [VRGATHER:VRGATHEREI16]} ? processing_cnt_q - ((NrLanes * DataWidth / 8) >> vinsn_issue.vtype.vsew) : processing_cnt_q - NrLanes * DataWidth;
       // Account for the written results by VCOMPRESS
       if (vinsn_issue.op == VCOMPRESS) begin
         vcompress_cnt_d = vcompress_cnt_d - ((NrLanes * DataWidth / 8) >> vinsn_issue.vtype.vsew);
@@ -1439,7 +1559,7 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
 
         // Decrement the counter of remaining vector elements waiting to be written
         if (!(vinsn_commit.op inside {VSE})) begin
-          if (vinsn_commit.op inside {[VIOTA:VID],[VRGATHER:VCOMPRESS]}) begin
+          if (vinsn_commit.op inside {[VIOTA:VID],[VSEGSUM:VFSEGSUM],[VRGATHER:VCOMPRESS]}) begin
             commit_cnt_d = commit_cnt_q - ((NrLanes * DataWidth / 8) >> unsigned'(vinsn_commit.vtype.vsew));
             if (commit_cnt_q < ((NrLanes * DataWidth / 8) >> unsigned'(vinsn_commit.vtype.vsew)))
               commit_cnt_d = '0;
@@ -1585,6 +1705,14 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
             in_m_ready_threshold_d = NrLanes*DataWidth/ViotaParallelism-1;
             out_valid_threshold_d  = ((NrLanes*DataWidth/8/ViotaParallelism) >> pe_req_i.vtype.vsew[1:0])-1;
           end
+          [VSEGSUM:VFSEGSUM]: begin
+            // Non-mask to non-mask: a full VRF word of vsew-bit elements per cycle
+            delta_elm_d = (NrLanes * DataWidth / 8) >> pe_req_i.vtype.vsew[1:0];
+
+            in_ready_threshold_d   = 0;
+            in_m_ready_threshold_d = (DataWidth >> (EW64 - pe_req_i.vtype.vsew[1:0]))-1;
+            out_valid_threshold_d  = 0;
+          end
           VCPOP: begin
             popcount_d = '0;
 
@@ -1651,6 +1779,9 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
       in_m_ready_threshold_q  <= '0;
       out_valid_threshold_q   <= '0;
       viota_acc_q             <= '0;
+      seg_acc_q               <= '0;
+      seg_wait_q              <= '0;
+      seg_started_q           <= 1'b0;
       found_one_q             <= '0;
       be_viota_seq_q          <= '1; // Default: write
       be_vrgat_seq_q          <= '1; // Default: write
@@ -1675,6 +1806,9 @@ module masku import ara_pkg::*; import rvv_pkg::*; #(
       in_m_ready_threshold_q  <= in_m_ready_threshold_d;
       out_valid_threshold_q   <= out_valid_threshold_d;
       viota_acc_q             <= viota_acc_d;
+      seg_acc_q               <= seg_acc_d;
+      seg_wait_q              <= seg_wait_d;
+      seg_started_q           <= seg_started_d;
       found_one_q             <= found_one_d;
       be_viota_seq_q          <= be_viota_seq_d;
       be_vrgat_seq_q          <= be_vrgat_seq_d;
